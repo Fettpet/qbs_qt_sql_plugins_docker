@@ -11,6 +11,11 @@ jobs:
         include:
           - distro: focal
             clang_major: 10
+            qbs_version: 1.20.1
+            docker_file: Dockerfile_qt4
+
+          - distro: focal
+            clang_major: 10
             qt: 5.15.2
             qt_major: 515
             qbs_version: 1.20.1

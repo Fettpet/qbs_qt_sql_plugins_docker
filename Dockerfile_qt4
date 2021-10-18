@@ -1,0 +1,145 @@
+# note: this would require --privileged
+# FROM ubuntu:bionic
+# ARG DISTRO=bionic
+
+ARG DISTRO=focal
+ARG CLANG_MAJOR=10
+ARG QBS_VERSION=1.20.1
+ARG RUNTIME_APT
+ARG RUNTIME_XENIAL="libicu55 libglib2.0-0"
+ARG RUNTIME_FOCAL="libicu66 libglib2.0-0 libpcre2-16-0"
+
+FROM ubuntu:${DISTRO} AS clang-base
+ARG DISTRO
+ARG CLANG_MAJOR
+
+ENV \
+    APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# install Clang (https://apt.llvm.org/)
+RUN apt-get update --quiet \
+    && apt-get upgrade --yes --quiet \
+    && apt-get install --yes --quiet --no-install-recommends \
+    wget \
+    gnupg \
+    apt-transport-https \
+    ca-certificates \
+    && wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+    && echo "deb http://apt.llvm.org/${DISTRO}/ llvm-toolchain-${DISTRO}-${CLANG_MAJOR} main" > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update --quiet \
+    && apt-get install --yes --quiet --no-install-recommends \
+    clang-${CLANG_MAJOR} \
+    lld-${CLANG_MAJOR} \
+    libc++abi-${CLANG_MAJOR}-dev \
+    libc++-${CLANG_MAJOR}-dev \
+    && update-alternatives --install /usr/bin/cc cc /usr/bin/clang-${CLANG_MAJOR} 100 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-${CLANG_MAJOR} 100 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${CLANG_MAJOR} 100 \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${CLANG_MAJOR} 100 \
+    && update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-${CLANG_MAJOR} 10 \
+    && update-alternatives --install /usr/bin/ld ld /usr/bin/ld.gold 20 \
+    && update-alternatives --install /usr/bin/ld ld /usr/bin/ld.bfd 30 \
+    && c++ --version \
+    && apt-get --yes autoremove \
+    && apt-get clean autoclean \
+    && rm -rf /var/lib/apt/lists/{apt,dpkg,cache,log} /tmp/* /var/tmp/*
+
+# compile & install Qbs
+FROM clang-base AS qbs-build
+ARG DISTRO
+ARG QT_MAJOR
+ARG QT_VERSION
+ARG QBS_VERSION
+
+ENV \
+    QTDIR=/usr/lib/x86_64-linux-gnu/qt4/ \
+    PATH=/usr/lib/x86_64-linux-gnu/qt4/bin:/opt/qbs/bin:${PATH} \
+    LD_LIBRARY_PATH=/opt/qsql_plugin:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH} \
+    PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig/:${PKG_CONFIG_PATH}
+
+RUN apt-get -y update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
+    git \
+    cmake \
+    build-essential \
+    libunwind8-dev \
+    libdbus-1-3 \ 
+    libpulse-mainloop-glib0 \ 
+    software-properties-common
+
+RUN add-apt-repository ppa:rock-core/qt4 \ 
+    && apt-get update \
+    && apt-get install -y \
+    qt4-default \
+    libqt4-dev \
+    libqt4-sql \
+    libqt4-sql-psql \
+    libqt4-sql-sqlite
+
+RUN \
+    apt-get update --quiet \
+    && apt-get install --yes --quiet --no-install-recommends \
+    git \
+    make \
+    libgl1-mesa-dev \
+    && apt-get --yes autoremove \
+    && apt-get clean autoclean \
+    && rm -rf /var/lib/apt/lists/{apt,dpkg,cache,log} /tmp/* /var/tmp/*
+
+RUN \
+    mkdir -p /opt/qbs \
+    && wget -qO - https://download.qt.io/official_releases/qbs/${QBS_VERSION}/qbs-linux-x86_64-${QBS_VERSION}.tar.gz | tar xvz --strip=1 -C /opt/qbs
+
+# install plugins
+RUN git clone --branch v4.8.7 --depth 1 https://github.com/qt/qt.git /opt/qtbase \
+    && cd /opt/qtbase/src/plugins/sqldrivers \
+    && apt-get install -y libmysqlclient-dev \
+    libpq-dev \
+    build-essential \
+    && cd mysql \ 
+    && sed -i '1s/^/typedef bool my_bool;\n/' ../../../sql/drivers/mysql/qsql_mysql.cpp 
+
+RUN cd  /opt/qtbase/src/plugins/sqldrivers/mysql \
+    && qmake "INCLUDEPATH+=/usr/include/mysql" \
+    && make -j \
+    && make install \
+    && mkdir /opt/qsql_plugin \
+    && mv *.so /opt/qsql_plugin/ \
+    && cd / \
+    && rm -rf /opt/qtbase
+
+# final qbs-clang-qt (with Qt)
+FROM qbs-build AS qbs-clang-qt
+ARG DISTRO
+ARG CLANG_MAJOR
+ARG QBS_VERSION
+ARG RUNTIME_APT
+ARG RUNTIME_FOCAL
+ARG RUNTIME_XENIAL
+
+LABEL Description="Ubuntu ${DISTRO} - Clang${CLANG_MAJOR} + Qt 4.8.7 + Qbs ${QBS_VERSION}"
+
+COPY --from=qbs-build /opt/qbs /opt/qbs
+COPY --from=qbs-build /opt/qsql_plugin /opt/qsql_plugin
+
+RUN apt-get update --quiet \
+    && if [ "${RUNTIME_APT}" != "" ] ; then export "RUNTIME_APT2=${RUNTIME_APT}" ; \
+    elif [ "${DISTRO}" = "xenial" ] ; then export "RUNTIME_APT2=${RUNTIME_XENIAL}" ; \
+    else export "RUNTIME_APT2=${RUNTIME_FOCAL}" ; \
+    fi \
+    && apt-get install --yes --quiet --no-install-recommends \
+    ${RUNTIME_APT2} \
+    mysql-client libmysqlclient21 libgssapi-krb5-2 \
+    postgresql-client-12 \
+    && apt-get --yes autoremove \
+    && apt-get clean autoclean \
+    && rm -rf /var/lib/apt/lists/{apt,dpkg,cache,log} /tmp/* /var/tmp/* \
+    && qbs setup-toolchains --detect \
+    && qbs setup-qt /usr/bin/qmake-qt4 qt4 \
+    && qbs config defaultProfile qt4 \
+    && qbs config --list
+
+WORKDIR /build
+# ENTRYPOINT [ "/opt/qbs/bin/qbs" ]
