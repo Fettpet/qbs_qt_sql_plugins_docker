@@ -110,6 +110,8 @@ RUN cd  /opt/qtbase/src/plugins/sqldrivers/mysql \
     && cd / \
     && rm -rf /opt/qtbase
 
+RUN apt-get remove -y git software-properties-common
+
 # final qbs-clang-qt (with Qt)
 FROM qbs-build AS qbs-clang-qt
 ARG DISTRO
@@ -142,4 +144,3 @@ RUN apt-get update --quiet \
     && qbs config --list
 
 WORKDIR /build
-# ENTRYPOINT [ "/opt/qbs/bin/qbs" ]
