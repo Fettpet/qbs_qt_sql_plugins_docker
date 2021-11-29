@@ -126,7 +126,9 @@ ENV \
     QTDIR=/opt/qt${QT_MAJOR} \
     PATH=/opt/qsql_plugin:/opt/qt${QT_MAJOR}/bin:/opt/qbs/bin:${PATH} \
     LD_LIBRARY_PATH=/opt/qsql_plugin:/opt/qt${QT_MAJOR}/lib/x86_64-linux-gnu:/opt/qt${QT_MAJOR}/lib:${LD_LIBRARY_PATH} \
-    PKG_CONFIG_PATH=/opt/qt${QT_MAJOR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+    PKG_CONFIG_PATH=/opt/qt${QT_MAJOR}/lib/pkgconfig:${PKG_CONFIG_PATH} \
+    CXX="clang++-${CLANG_MAJOR}" \
+    CC="clang-${CLANG_MAJOR}"
 
 RUN apt-get update --quiet \
     && if [ "${RUNTIME_APT}" != "" ] ; then export "RUNTIME_APT2=${RUNTIME_APT}" ; \
