@@ -136,6 +136,7 @@ RUN apt-get update --quiet \
     fi \
     && apt-get install --yes --quiet --no-install-recommends \
     ${RUNTIME_APT2} \
+    make \
     mysql-client libmysqlclient21 libgssapi-krb5-2 \
     postgresql-client-12 \
     && apt-get --yes autoremove \
